@@ -180,3 +180,91 @@
     (ok true)
   )
 )
+
+;; Update player score
+(define-public (update-player-score 
+  (player principal) 
+  (new-score uint)
+)
+  (let 
+    (
+      (current-stats (unwrap! 
+        (map-get? leaderboard { player: player }) 
+        ERR-PLAYER-NOT-FOUND
+      ))
+    )
+    (asserts! (is-game-admin tx-sender) ERR-NOT-AUTHORIZED)
+    (asserts! (is-safe-principal player) ERR-INVALID-INPUT)
+    (asserts! (and (>= new-score u0) (<= new-score u10000)) ERR-INVALID-SCORE)
+    
+    (map-set leaderboard 
+      { player: player }
+      (merge current-stats 
+        {
+          score: new-score,
+          games-played: (+ (get games-played current-stats) u1)
+        }
+      )
+    )
+    
+    (ok true)
+  )
+)
+
+;; Distribute Bitcoin rewards
+(define-public (distribute-bitcoin-rewards)
+  (let 
+    (
+      (top-players (get-top-players))
+    )
+    (asserts! (is-game-admin tx-sender) ERR-NOT-AUTHORIZED)
+    
+    (try! 
+      (fold distribute-reward 
+        (filter is-valid-reward-candidate top-players) 
+        (ok true)
+      )
+    )
+    
+    (ok true)
+  )
+)
+
+;; Validate reward candidate
+(define-private (is-valid-reward-candidate (player principal))
+  (match (map-get? leaderboard { player: player })
+    stats (and 
+            (> (get score stats) u0)
+            (is-safe-principal player)
+          )
+    false
+  )
+)
+
+;; Distribute individual reward
+(define-private (distribute-reward 
+  (player principal) 
+  (previous-result (response bool uint))
+)
+  (match (map-get? leaderboard { player: player })
+    player-stats 
+      (let 
+        (
+          (reward-amount (calculate-reward (get score player-stats)))
+        )
+        (if (and (is-ok previous-result) (> reward-amount u0))
+          (begin
+            (map-set leaderboard 
+              { player: player }
+              (merge player-stats 
+                { total-rewards: (+ (get total-rewards player-stats) reward-amount) }
+              )
+            )
+            (ok true)
+          )
+          previous-result
+        )
+      )
+    previous-result
+  )
+)
